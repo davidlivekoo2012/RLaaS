@@ -1,0 +1,713 @@
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rlaas-system
+  labels:
+    name: rlaas-system
+    app.kubernetes.io/name: rlaas
+    app.kubernetes.io/version: "1.0.0"
+
+---
+# ConfigMap for RLaaS Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rlaas-config
+  namespace: rlaas-system
+data:
+  config.yaml: |
+    # RLaaS Configuration
+    api:
+      host: "0.0.0.0"
+      port: 8000
+      workers: 4
+      
+    database:
+      url: "postgresql://rlaas:rlaas123@postgres:5432/rlaas"
+      pool_size: 20
+      
+    redis:
+      url: "redis://redis:6379/0"
+      
+    kafka:
+      bootstrap_servers: ["kafka:9092"]
+      
+    mlflow:
+      tracking_uri: "http://mlflow:5000"
+      
+    minio:
+      endpoint: "minio:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+      
+    monitoring:
+      prometheus_port: 9090
+      grafana_port: 3000
+
+---
+# Secret for sensitive data
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rlaas-secrets
+  namespace: rlaas-system
+type: Opaque
+data:
+  # Base64 encoded values
+  database-password: cmxhYXMxMjM=  # rlaas123
+  redis-password: ""
+  minio-access-key: bWluaW9hZG1pbg==  # minioadmin
+  minio-secret-key: bWluaW9hZG1pbg==  # minioadmin
+
+---
+# PostgreSQL Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: rlaas-system
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: "rlaas"
+        - name: POSTGRES_USER
+          value: "rlaas"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: database-password
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: rlaas-system
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+# PostgreSQL PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: rlaas-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: rlaas-system
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: rlaas-system
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+
+---
+# Kafka Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: rlaas-system
+  labels:
+    app: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:latest
+        ports:
+        - containerPort: 9092
+        env:
+        - name: KAFKA_BROKER_ID
+          value: "1"
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: "zookeeper:2181"
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: "PLAINTEXT://kafka:9092"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "1"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+---
+# Kafka Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: rlaas-system
+spec:
+  selector:
+    app: kafka
+  ports:
+  - port: 9092
+    targetPort: 9092
+  type: ClusterIP
+
+---
+# Zookeeper Deployment (for Kafka)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zookeeper
+  namespace: rlaas-system
+  labels:
+    app: zookeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: confluentinc/cp-zookeeper:latest
+        ports:
+        - containerPort: 2181
+        env:
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: "2181"
+        - name: ZOOKEEPER_TICK_TIME
+          value: "2000"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+# Zookeeper Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: rlaas-system
+spec:
+  selector:
+    app: zookeeper
+  ports:
+  - port: 2181
+    targetPort: 2181
+  type: ClusterIP
+
+---
+# MinIO Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: rlaas-system
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:latest
+        ports:
+        - containerPort: 9000
+        - containerPort: 9001
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: minio-access-key
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: minio-secret-key
+        command:
+        - /bin/bash
+        - -c
+        args:
+        - minio server /data --console-address ":9001"
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: minio-storage
+        persistentVolumeClaim:
+          claimName: minio-pvc
+
+---
+# MinIO Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: rlaas-system
+spec:
+  selector:
+    app: minio
+  ports:
+  - name: api
+    port: 9000
+    targetPort: 9000
+  - name: console
+    port: 9001
+    targetPort: 9001
+  type: ClusterIP
+
+---
+# MinIO PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: rlaas-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# MLflow Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: rlaas-system
+  labels:
+    app: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      containers:
+      - name: mlflow
+        image: python:3.9-slim
+        ports:
+        - containerPort: 5000
+        command:
+        - /bin/bash
+        - -c
+        args:
+        - |
+          pip install mlflow psycopg2-binary boto3
+          mlflow server \
+            --backend-store-uri postgresql://rlaas:rlaas123@postgres:5432/rlaas \
+            --default-artifact-root s3://mlflow-artifacts/ \
+            --host 0.0.0.0 \
+            --port 5000
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: minio-access-key
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: minio-secret-key
+        - name: MLFLOW_S3_ENDPOINT_URL
+          value: "http://minio:9000"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+---
+# MLflow Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: rlaas-system
+spec:
+  selector:
+    app: mlflow
+  ports:
+  - port: 5000
+    targetPort: 5000
+  type: ClusterIP
+
+---
+# RLaaS API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rlaas-api
+  namespace: rlaas-system
+  labels:
+    app: rlaas-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: rlaas-api
+  template:
+    metadata:
+      labels:
+        app: rlaas-api
+    spec:
+      containers:
+      - name: rlaas-api
+        image: rlaas/api:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://rlaas:rlaas123@postgres:5432/rlaas"
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: MLFLOW_TRACKING_URI
+          value: "http://mlflow:5000"
+        - name: MINIO_ENDPOINT
+          value: "minio:9000"
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: minio-access-key
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: minio-secret-key
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: rlaas-config
+
+---
+# RLaaS API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rlaas-api
+  namespace: rlaas-system
+spec:
+  selector:
+    app: rlaas-api
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+
+---
+# RLaaS Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rlaas-worker
+  namespace: rlaas-system
+  labels:
+    app: rlaas-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rlaas-worker
+  template:
+    metadata:
+      labels:
+        app: rlaas-worker
+    spec:
+      containers:
+      - name: rlaas-worker
+        image: rlaas/worker:latest
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://rlaas:rlaas123@postgres:5432/rlaas"
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: MLFLOW_TRACKING_URI
+          value: "http://mlflow:5000"
+        - name: WORKER_TYPE
+          value: "optimization"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+      volumes:
+      - name: config
+        configMap:
+          name: rlaas-config
+
+---
+# RLaaS Training Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rlaas-training-worker
+  namespace: rlaas-system
+  labels:
+    app: rlaas-training-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rlaas-training-worker
+  template:
+    metadata:
+      labels:
+        app: rlaas-training-worker
+    spec:
+      containers:
+      - name: rlaas-training-worker
+        image: rlaas/training-worker:latest
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://rlaas:rlaas123@postgres:5432/rlaas"
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"
+        - name: MLFLOW_TRACKING_URI
+          value: "http://mlflow:5000"
+        - name: WORKER_TYPE
+          value: "training"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+            nvidia.com/gpu: 1
+      volumes:
+      - name: config
+        configMap:
+          name: rlaas-config
+
+---
+# RLaaS Inference Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rlaas-inference
+  namespace: rlaas-system
+  labels:
+    app: rlaas-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rlaas-inference
+  template:
+    metadata:
+      labels:
+        app: rlaas-inference
+    spec:
+      containers:
+      - name: rlaas-inference
+        image: rlaas/inference:latest
+        ports:
+        - containerPort: 8001
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://rlaas:rlaas123@postgres:5432/rlaas"
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"
+        - name: MLFLOW_TRACKING_URI
+          value: "http://mlflow:5000"
+        - name: MINIO_ENDPOINT
+          value: "minio:9000"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: rlaas-config
+
+---
+# RLaaS Inference Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rlaas-inference
+  namespace: rlaas-system
+spec:
+  selector:
+    app: rlaas-inference
+  ports:
+  - port: 8001
+    targetPort: 8001
+  type: ClusterIP
