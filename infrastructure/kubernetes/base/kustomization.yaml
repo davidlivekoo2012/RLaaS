@@ -1,0 +1,80 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: rlaas-base
+  annotations:
+    config.kubernetes.io/local-config: "true"
+
+namespace: rlaas-system
+
+commonLabels:
+  app.kubernetes.io/name: rlaas
+  app.kubernetes.io/instance: rlaas
+  app.kubernetes.io/version: "0.1.0"
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+- namespace.yaml
+- secrets.yaml
+- configmap.yaml
+- database.yaml
+- redis.yaml
+- kafka.yaml
+- minio.yaml
+- mlflow.yaml
+- api-gateway.yaml
+- optimization-engine.yaml
+- policy-engine.yaml
+- scheduler.yaml
+- model-registry.yaml
+- training-orchestrator.yaml
+- inference-service.yaml
+- web-console.yaml
+- monitoring.yaml
+
+images:
+- name: rlaas
+  newTag: latest
+
+configMapGenerator:
+- name: rlaas-config
+  files:
+  - config/app.yaml
+  - config/optimization.yaml
+  - config/policy.yaml
+
+secretGenerator:
+- name: rlaas-generated-secrets
+  literals:
+  - jwt-secret=change-this-jwt-secret-in-production
+  - encryption-key=change-this-encryption-key-in-production
+
+replicas:
+- name: rlaas-api-gateway
+  count: 3
+- name: rlaas-optimization-engine
+  count: 2
+- name: rlaas-policy-engine
+  count: 2
+
+patches:
+- target:
+    kind: Deployment
+    name: rlaas-api-gateway
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: DEPLOYMENT_ENV
+        value: "kubernetes"
+
+- target:
+    kind: Service
+    name: rlaas-api-gateway
+  patch: |-
+    - op: add
+      path: /metadata/annotations
+      value:
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+        service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"

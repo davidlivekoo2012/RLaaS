@@ -1,0 +1,46 @@
+apiVersion: v2
+name: rlaas
+description: RLaaS - Reinforcement Learning as a Service Platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/rlaas/rlaas
+sources:
+  - https://github.com/rlaas/rlaas
+maintainers:
+  - name: RLaaS Team
+    email: team@rlaas.ai
+keywords:
+  - reinforcement-learning
+  - machine-learning
+  - optimization
+  - ai
+  - platform
+annotations:
+  category: Machine Learning
+  licenses: MIT
+dependencies:
+  - name: postgresql
+    version: "12.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: kafka
+    version: "25.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled
+  - name: minio
+    version: "12.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: minio.enabled
+  - name: prometheus
+    version: "25.x.x"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: monitoring.prometheus.enabled
+  - name: grafana
+    version: "7.x.x"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: monitoring.grafana.enabled

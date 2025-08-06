@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rlaas-policy-engine
+  labels:
+    app.kubernetes.io/name: policy-engine
+    app.kubernetes.io/instance: rlaas
+    app.kubernetes.io/component: policy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-engine
+      app.kubernetes.io/instance: rlaas
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: policy-engine
+        app.kubernetes.io/instance: rlaas
+        app.kubernetes.io/component: policy
+    spec:
+      containers:
+      - name: policy-engine
+        image: rlaas:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-m", "rlaas.core.policy.engine"]
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: redis-url
+        - name: MLFLOW_TRACKING_URI
+          value: "http://mlflow:5000"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+            nvidia.com/gpu: "0"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: policy-models
+          mountPath: /app/models
+        - name: policy-data
+          mountPath: /app/data/policy
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+      volumes:
+      - name: policy-models
+        persistentVolumeClaim:
+          claimName: rlaas-policy-models
+      - name: policy-data
+        persistentVolumeClaim:
+          claimName: rlaas-policy-data
+      - name: config
+        configMap:
+          name: rlaas-config
+      nodeSelector:
+        accelerator: nvidia-tesla-v100
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rlaas-policy-engine
+  labels:
+    app.kubernetes.io/name: policy-engine
+    app.kubernetes.io/instance: rlaas
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8002
+    targetPort: 8002
+    protocol: TCP
+    name: http
+  selector:
+    app.kubernetes.io/name: policy-engine
+    app.kubernetes.io/instance: rlaas
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rlaas-policy-models
+  labels:
+    app.kubernetes.io/name: policy-engine
+    app.kubernetes.io/instance: rlaas
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: fast-ssd
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rlaas-policy-data
+  labels:
+    app.kubernetes.io/name: policy-engine
+    app.kubernetes.io/instance: rlaas
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: fast-ssd

@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rlaas-optimization-engine
+  labels:
+    app.kubernetes.io/name: optimization-engine
+    app.kubernetes.io/instance: rlaas
+    app.kubernetes.io/component: optimization
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: optimization-engine
+      app.kubernetes.io/instance: rlaas
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: optimization-engine
+        app.kubernetes.io/instance: rlaas
+        app.kubernetes.io/component: optimization
+    spec:
+      containers:
+      - name: optimization-engine
+        image: rlaas:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-m", "rlaas.core.optimization.engine"]
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: rlaas-secrets
+              key: redis-url
+        - name: NSGA_POPULATION_SIZE
+          value: "100"
+        - name: NSGA_GENERATIONS
+          value: "500"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: optimization-data
+          mountPath: /app/data/optimization
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+      volumes:
+      - name: optimization-data
+        persistentVolumeClaim:
+          claimName: rlaas-optimization-data
+      - name: config
+        configMap:
+          name: rlaas-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rlaas-optimization-engine
+  labels:
+    app.kubernetes.io/name: optimization-engine
+    app.kubernetes.io/instance: rlaas
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8001
+    targetPort: 8001
+    protocol: TCP
+    name: http
+  selector:
+    app.kubernetes.io/name: optimization-engine
+    app.kubernetes.io/instance: rlaas
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rlaas-optimization-data
+  labels:
+    app.kubernetes.io/name: optimization-engine
+    app.kubernetes.io/instance: rlaas
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd
